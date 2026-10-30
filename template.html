@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field Translator</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2f6b4f">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Field Translator">
+<style>
+:root {
+  --bg: #f6f5f1; --card: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #dddbd3;
+  --accent: #2f6b4f; --accent-ink: #ffffff; --warn: #a3471b; --warn-bg: #fbeee6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161715; --card: #20221f; --ink: #ecebe6; --muted: #a2a29a; --line: #34362f;
+    --accent: #6fbf95; --accent-ink: #10130f; --warn: #f0a37a; --warn-bg: #3a261b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+main { max-width: 680px; margin: 0 auto; padding: 12px 16px 40px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+h1 { font-size: 17px; margin: 4px 0; }
+.modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+.modes button { padding: 10px 4px; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  border-radius: 10px; font-size: 15px; font-weight: 600; }
+.modes button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+textarea { width: 100%; min-height: 110px; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--ink); font: inherit; resize: vertical; }
+.row { display: flex; gap: 8px; margin: 8px 0; }
+.row button { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--card); color: var(--ink); font-size: 15px; }
+.row button.primary { flex: 2; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.out { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-height: 60px;
+  white-space: pre-wrap; word-break: break-word; }
+.meta { color: var(--muted); font-size: 13px; margin: 4px 2px; display: flex; justify-content: space-between; gap: 8px; }
+.warn { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 6px 10px; font-size: 14px; margin-top: 6px; }
+.hist { margin-top: 18px; }
+.hist h2 { font-size: 14px; color: var(--muted); margin: 0 0 6px; }
+.item { border-top: 1px solid var(--line); padding: 8px 2px; font-size: 14px; }
+.item .head { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 12px; }
+.item .src { color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.item .dst { white-space: pre-wrap; word-break: break-word; }
+.divider { text-align: center; color: var(--muted); font-size: 12px; border-top: 2px dashed var(--line); padding: 4px 0; margin-top: 4px; }
+details { margin-top: 18px; color: var(--muted); font-size: 14px; }
+details input, details select { width: 100%; padding: 8px; margin: 4px 0 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; }
+.icon-btn { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+.danger { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--warn); background: none; color: var(--warn); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Field Translator</h1>
+    <span>
+      <button class="icon-btn" id="install" hidden>インストール</button>
+      <button class="icon-btn" id="newconv" title="ここから先は、前の会話を文脈に使わない">新しい会話</button>
+    </span>
+  </header>
+
+  <div class="modes" role="group" aria-label="モード">
+    <button data-mode="pt-ja" aria-pressed="true">PT ⇔ JA</button>
+    <button data-mode="en-ja" aria-pressed="false">EN ⇔ JA</button>
+    <button data-mode="en-pt" aria-pressed="false">EN ⇔ PT</button>
+  </div>
+
+  <textarea id="input" placeholder="ここに貼り付けると自動で訳します / Cole aqui"></textarea>
+  <div class="meta"><span id="status"></span><span></span></div>
+  <div class="row">
+    <button id="paste">貼り付け</button>
+    <button id="go" class="primary">今すぐ翻訳</button>
+  </div>
+
+  <div class="meta"><span id="dir"></span><span id="time"></span></div>
+  <div class="out" id="output" aria-live="polite"></div>
+  <div class="warn" id="warn" hidden></div>
+  <div class="row"><button id="copy">訳文をコピー</button></div>
+
+  <section class="hist">
+    <h2>履歴(新しい順。区切り線より後の直近6件を文脈に使います)</h2>
+    <div id="history"></div>
+  </section>
+
+  <details>
+    <summary>設定</summary>
+    <label>合言葉(用語集を開く鍵。この端末にだけ保存)<input id="pass" type="password" autocomplete="off"></label>
+    <label>Gemini API キー(この端末にだけ保存)<input id="key" type="password" autocomplete="off"></label>
+    <label>モデル
+      <select id="model">
+        <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite(速い・既定)</option>
+        <option value="gemini-3.5-flash">gemini-3.5-flash(やや遅い)</option>
+      </select>
+    </label>
+    <label>手で入力したとき、手が止まってから自動で訳すまで
+      <select id="delay">
+        <option value="1500">1.5秒</option>
+        <option value="2500">2.5秒(既定)</option>
+        <option value="4000">4秒</option>
+        <option value="0">自動で訳さない(「今すぐ翻訳」を押す)</option>
+      </select>
+    </label>
+    <button class="danger" id="clearhist">履歴をすべて消す</button>
+  </details>
+</main>
+
+<script>
+// 指示書は暗号化して埋め込んである(scripts/build_app.py)。合言葉で復号する。
+const SECRET = __SECRET__;
+let SYSTEM_PROMPT = null;
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function unlock(pw) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: b64(SECRET.salt), iterations: SECRET.iter },
+    base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(SECRET.iv) }, key, b64(SECRET.ct));
+  return new TextDecoder().decode(plain);
+}
+const LANG_NAME = { pt: "Mozambican Portuguese", ja: "Japanese", en: "English" };
+const LANG_SHORT = { pt: "PT", ja: "JA", en: "EN" };
+const MODES = { "pt-ja": ["pt", "ja"], "en-ja": ["en", "ja"], "en-pt": ["en", "pt"] };
+const PT_HINT = /[ãõçáéíóúâêôà]|\b(de|que|não|para|com|uma|está|hoje|amanhã|colegas?|obrigad[oa]|bom|boa|peço|vou|estou)\b/gi;
+const EN_HINT = /\b(the|is|are|and|you|we|this|that|please|thank|will|have|today|tomorrow|what|with)\b/gi;
+const CJK = /[぀-ヿ一-鿿]/;
+const HIST_MAX = 200, CONTEXT_N = 6;
+
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+
+// translator.py の detect / direction と同じ規則
+function detect(text) {
+  const t = text.replace(/@\S+/g, "");
+  if (CJK.test(t)) return "ja";
+  const pt = (t.match(PT_HINT) || []).length, en = (t.match(EN_HINT) || []).length;
+  return en > pt ? "en" : "pt";
+}
+function direction(text, mode) {
+  const [a, b] = MODES[mode], src = detect(text);
+  if (src === a) return [src, b];
+  if (src === b) return [src, a];
+  return [src, mode === "en-pt" ? b : "ja"];
+}
+function buildUser(text, src, tgt, context) {
+  let ctx = "";
+  if (context.length) ctx = "Recent messages in this conversation (for context only, do not translate them):\n" +
+    context.slice(-CONTEXT_N).map(c => "- " + c.src).join("\n") + "\n\n";
+  return `${ctx}Translate from ${LANG_NAME[src]} to ${LANG_NAME[tgt]}:\n\n${text}`;
+}
+// 履歴は古い順の配列。{type:"t", ts, src, dst, from, to} か、区切り {type:"break", ts}
+function contextFrom(hist) {
+  const out = [];
+  for (let i = hist.length - 1; i >= 0 && out.length < CONTEXT_N; i--) {
+    if (hist[i].type === "break") break;
+    out.unshift(hist[i]);
+  }
+  return out;
+}
+// 日本語の訳文で、日本人以外の名前は「Name-san」の形にそろえる(モデルが指示どおりにしないことがあるため)。translator.py の fix_names と同じ規則
+// 名前の一覧は人名なので、指示書と一緒に暗号化してある(unlock の後に入る)
+let JAPANESE_LATIN = new Set(), KATAKANA_NAMES = [];
+function fixNames(text) {
+  for (const [kana, latin] of KATAKANA_NAMES) text = text.split(kana + "さん").join(latin + "さん");
+  return text.replace(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'.\-]*)\s?さん/g, (m, name) =>
+    JAPANESE_LATIN.has(name.toLowerCase()) ? name + "さん" : name + "-san");
+}
+// 翻訳中に続きを打っていたら、訳した部分だけを消して続きは残す
+function remainder(current, sent) {
+  return current.startsWith(sent) ? current.slice(sent.length).replace(/^\s+/, "") : current;
+}
+
+let mode = store("mode") || "pt-ja";
+let history = [];
+try { history = JSON.parse(store("history_v1") || "[]"); } catch (e) { history = []; }
+let busy = false, composing = false, timer = null;
+const $ = id => document.getElementById(id);
+
+function saveHistory() { history = history.slice(-HIST_MAX); store("history_v1", JSON.stringify(history)); }
+function fmt(ts) { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
+function renderModes() {
+  document.querySelectorAll(".modes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+}
+function renderHistory() {
+  const box = $("history"); box.innerHTML = "";
+  history.slice().reverse().forEach(h => {
+    if (h.type === "break") {
+      const d = document.createElement("div"); d.className = "divider"; d.textContent = `新しい会話 ${fmt(h.ts)}`; box.append(d); return;
+    }
+    const d = document.createElement("div"); d.className = "item";
+    const head = document.createElement("div"); head.className = "head";
+    const label = document.createElement("span"); label.textContent = `${fmt(h.ts)}  ${LANG_SHORT[h.from]} → ${LANG_SHORT[h.to]}`;
+    const btn = document.createElement("button"); btn.className = "icon-btn"; btn.textContent = "コピー";
+    btn.onclick = () => { try { navigator.clipboard.writeText(h.dst); btn.textContent = "コピーしました"; } catch (e) {} };
+    head.append(label, btn);
+    const s = document.createElement("div"); s.className = "src"; s.textContent = h.src;
+    const t = document.createElement("div"); t.className = "dst"; t.textContent = h.dst;
+    d.append(head, s, t); box.append(d);
+  });
+}
+function setStatus(msg) { $("status").textContent = msg; }
+
+// ms を渡すとその時間で(貼り付けは 0)、渡さなければ設定の待ち時間で自動翻訳する。設定が「自動で訳さない」なら何もしない
+function schedule(ms) {
+  clearTimeout(timer);
+  const setting = Number($("delay").value);
+  if (!setting) { setStatus(""); return; }
+  const delay = ms ?? setting;
+  if ($("input").value.trim() && delay) setStatus(`手が止まったら訳します(${(delay / 1000).toFixed(1)}秒)`);
+  timer = setTimeout(() => { if (!composing) translate(); }, delay);
+}
+
+async function translate() {
+  clearTimeout(timer);
+  const text = $("input").value.trim();
+  const key = $("key").value.trim();
+  if (!text || busy) return;
+  if (!key) { $("output").textContent = "設定に Gemini API キーを入れてください。"; return; }
+  if (!SYSTEM_PROMPT) {
+    try {
+      const sec = JSON.parse(await unlock($("pass").value.trim()));
+      SYSTEM_PROMPT = sec.prompt; JAPANESE_LATIN = new Set(sec.japanese_latin); KATAKANA_NAMES = sec.katakana_names;
+      store("pass", $("pass").value.trim());
+    }
+    catch (e) { $("output").textContent = "合言葉が違います。設定を開いて、合言葉を入れ直してください。"; return; }
+  }
+  const sentRaw = $("input").value;
+  busy = true; setStatus("翻訳中…");
+  const [src, tgt] = direction(text, mode);
+  $("dir").textContent = `${LANG_SHORT[src]} → ${LANG_SHORT[tgt]}`;
+  $("output").textContent = ""; $("warn").hidden = true; $("time").textContent = "…";
+  const t0 = performance.now(); let first = null, out = "";
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${$("model").value}:streamGenerateContent?alt=sse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: buildUser(text, src, tgt, contextFrom(history)) }] }],
+        generationConfig: { temperature: 0.2, thinkingConfig: { thinkingLevel: "minimal" } },
+      }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
+    const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith("data:")) continue;
+        const parts = JSON.parse(line.slice(5)).candidates?.[0]?.content?.parts || [];
+        const chunk = parts.map(p => p.text || "").join("");
+        if (chunk) { if (first === null) first = performance.now() - t0; out += chunk; $("output").textContent = tgt === "ja" ? fixNames(out) : out; }
+      }
+    }
+    out = out.trim(); if (tgt === "ja") out = fixNames(out); $("output").textContent = out;
+    const total = (performance.now() - t0) / 1000;
+    $("time").textContent = `最初 ${((first ?? 0) / 1000).toFixed(1)}秒 / 合計 ${total.toFixed(1)}秒`;
+    if (tgt !== "ja" && CJK.test(out)) { $("warn").textContent = "訳文に日本語の文字が混ざっています。履歴の原文を貼り直して、もう一度訳してください。"; $("warn").hidden = false; }
+    history.push({ type: "t", ts: Date.now(), src: text, dst: out, from: src, to: tgt }); saveHistory(); renderHistory();
+    $("input").value = remainder($("input").value, sentRaw);
+    setStatus("");
+  } catch (e) {
+    $("output").textContent = "エラー: " + e.message + "\n(入力欄はそのまま残しています)"; $("time").textContent = ""; setStatus("");
+  } finally {
+    busy = false;
+    if ($("input").value.trim()) schedule();  // 翻訳中に打った続きがあれば、それも訳す
+  }
+}
+
+document.querySelectorAll(".modes button").forEach(b => b.onclick = () => { mode = b.dataset.mode; store("mode", mode); renderModes(); });
+$("go").onclick = translate;
+const inp = $("input");
+inp.addEventListener("compositionstart", () => { composing = true; clearTimeout(timer); });
+inp.addEventListener("compositionend", () => { composing = false; schedule(); });
+inp.addEventListener("input", e => { if (e.inputType === "insertFromPaste") return; if (!composing) schedule(); });
+inp.addEventListener("paste", () => setTimeout(() => schedule(0), 0));
+inp.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) translate(); });
+$("paste").onclick = async () => { try { inp.value = await navigator.clipboard.readText(); schedule(0); } catch (e) { inp.focus(); } };
+$("copy").onclick = () => { try { navigator.clipboard.writeText($("output").textContent); } catch (e) {} };
+$("newconv").onclick = () => {
+  if (history.length && history[history.length - 1].type !== "break") { history.push({ type: "break", ts: Date.now() }); saveHistory(); renderHistory(); }
+  $("output").textContent = ""; $("dir").textContent = ""; $("time").textContent = ""; setStatus("新しい会話を始めました");
+};
+$("clearhist").onclick = () => { if (confirm("履歴をすべて消しますか?(元に戻せません)")) { history = []; saveHistory(); renderHistory(); } };
+$("pass").value = store("pass") || "";
+$("pass").onchange = () => { SYSTEM_PROMPT = null; };
+$("key").value = store("gemini_key") || "";
+$("key").onchange = () => store("gemini_key", $("key").value.trim());
+$("model").value = store("model") || "gemini-3.5-flash-lite";
+$("model").onchange = () => store("model", $("model").value);
+$("delay").value = store("delay") || "2500";
+$("delay").onchange = () => store("delay", $("delay").value);
+renderModes(); renderHistory();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+// ホーム画面に追加できるとき(Chrome が知らせてくれたとき)だけ「インストール」を出す
+let installPrompt = null;
+addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; $("install").hidden = false; });
+$("install").onclick = async () => { if (!installPrompt) return; installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; $("install").hidden = true; };
+addEventListener("appinstalled", () => { $("install").hidden = true; });
+</script>
+</body>
+</html>
