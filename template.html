@@ -51,6 +51,14 @@ details { margin-top: 18px; color: var(--muted); font-size: 14px; }
 details input, details select { width: 100%; padding: 8px; margin: 4px 0 10px; border: 1px solid var(--line);
   border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; }
 .icon-btn { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+.spin { display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; border: 2px solid currentColor;
+  border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.row button:disabled { opacity: .75; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg);
+  padding: 10px 18px; border-radius: 999px; font-size: 15px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.show { opacity: .95; }
 .danger { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--warn); background: none; color: var(--warn); font-size: 14px; }
 </style>
 </head>
@@ -70,11 +78,11 @@ details input, details select { width: 100%; padding: 8px; margin: 4px 0 10px; b
     <button data-mode="en-pt" aria-pressed="false">EN ⇔ PT</button>
   </div>
 
-  <textarea id="input" placeholder="ここに貼り付けると自動で訳します / Cole aqui"></textarea>
+  <textarea id="input" placeholder="貼り付けるとすぐ訳します。手で打ったときは「翻訳する」(PC は Ctrl+Enter) / Cole aqui"></textarea>
   <div class="meta"><span id="status"></span><span></span></div>
   <div class="row">
     <button id="paste">貼り付け</button>
-    <button id="go" class="primary">今すぐ翻訳</button>
+    <button id="go" class="primary">翻訳する</button>
   </div>
 
   <div class="meta"><span id="dir"></span><span id="time"></span></div>
@@ -97,17 +105,17 @@ details input, details select { width: 100%; padding: 8px; margin: 4px 0 10px; b
         <option value="gemini-3.5-flash">gemini-3.5-flash(やや遅い)</option>
       </select>
     </label>
-    <label>手で入力したとき、手が止まってから自動で訳すまで
-      <select id="delay">
-        <option value="1500">1.5秒</option>
-        <option value="2500">2.5秒(既定)</option>
-        <option value="4000">4秒</option>
-        <option value="0">自動で訳さない(「今すぐ翻訳」を押す)</option>
+    <label>自動で訳すとき
+      <select id="auto">
+        <option value="paste">貼り付けたときだけ(既定。手で打ったときは「翻訳する」か Ctrl+Enter)</option>
+        <option value="typing">貼り付けたときと、手で打って2.5秒止まったとき</option>
+        <option value="off">自動で訳さない(いつも「翻訳する」を押す)</option>
       </select>
     </label>
     <button class="danger" id="clearhist">履歴をすべて消す</button>
   </details>
 </main>
+<div class="toast" id="toast" role="status"></div>
 
 <script>
 // 指示書は暗号化して埋め込んである(scripts/build_app.py)。合言葉で復号する。
@@ -193,21 +201,53 @@ function renderHistory() {
     const head = document.createElement("div"); head.className = "head";
     const label = document.createElement("span"); label.textContent = `${fmt(h.ts)}  ${LANG_SHORT[h.from]} → ${LANG_SHORT[h.to]}`;
     const btn = document.createElement("button"); btn.className = "icon-btn"; btn.textContent = "コピー";
-    btn.onclick = () => { try { navigator.clipboard.writeText(h.dst); btn.textContent = "コピーしました"; } catch (e) {} };
+    btn.onclick = () => copyText(h.dst, btn);
     head.append(label, btn);
     const s = document.createElement("div"); s.className = "src"; s.textContent = h.src;
     const t = document.createElement("div"); t.className = "dst"; t.textContent = h.dst;
     d.append(head, s, t); box.append(d);
   });
 }
-function setStatus(msg) { $("status").textContent = msg; }
+function setStatus(msg, spinning = false) {
+  const el = $("status"); el.textContent = "";
+  if (spinning) { const sp = document.createElement("span"); sp.className = "spin"; el.append(sp, " "); }
+  el.append(msg);
+}
+function setBusy(on) {
+  const go = $("go"); go.disabled = on; go.textContent = "";
+  if (on) { const sp = document.createElement("span"); sp.className = "spin"; go.append(sp, " 翻訳中…"); }
+  else go.textContent = "翻訳する";
+}
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1600);
+}
+// コピーして、ボタンの文字と画面下の通知で知らせる(古いブラウザでは execCommand で代用)
+async function copyText(text, btn) {
+  if (!text.trim()) { toast("コピーする訳文がありません"); return; }
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; }
+  catch (e) {
+    const ta = document.createElement("textarea"); ta.value = text; document.body.append(ta); ta.select();
+    try { ok = document.execCommand("copy"); } catch (e2) {}
+    ta.remove();
+  }
+  toast(ok ? "コピーしました" : "コピーできませんでした");
+  if (btn) {
+    const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
+    btn.textContent = ok ? "✓ コピーしました" : "コピーできませんでした";
+    clearTimeout(btn._t); btn._t = setTimeout(() => { btn.textContent = label; }, 1600);
+  }
+}
 
-// ms を渡すとその時間で(貼り付けは 0)、渡さなければ設定の待ち時間で自動翻訳する。設定が「自動で訳さない」なら何もしない
+// 貼り付けは schedule(0) ですぐ訳す。手入力は設定が「typing」のときだけ、手が止まって2.5秒後に訳す
+const TYPING_DELAY = 2500;
 function schedule(ms) {
   clearTimeout(timer);
-  const setting = Number($("delay").value);
-  if (!setting) { setStatus(""); return; }
-  const delay = ms ?? setting;
+  const auto = $("auto").value;
+  if (auto === "off" || (ms === undefined && auto !== "typing")) { setStatus(""); return; }
+  const delay = ms ?? TYPING_DELAY;
   if ($("input").value.trim() && delay) setStatus(`手が止まったら訳します(${(delay / 1000).toFixed(1)}秒)`);
   timer = setTimeout(() => { if (!composing) translate(); }, delay);
 }
@@ -218,19 +258,23 @@ async function translate() {
   const key = $("key").value.trim();
   if (!text || busy) return;
   if (!key) { $("output").textContent = "設定に Gemini API キーを入れてください。"; return; }
+  // 押した瞬間からクルクルを出す(初回は合言葉の復号に少し時間がかかる)
+  busy = true; setStatus("翻訳中…", true); setBusy(true);
+  $("output").innerHTML = '<span class="loading"><span class="spin"></span>翻訳中…</span>'; $("warn").hidden = true; $("time").textContent = "";
   if (!SYSTEM_PROMPT) {
     try {
       const sec = JSON.parse(await unlock($("pass").value.trim()));
       SYSTEM_PROMPT = sec.prompt; JAPANESE_LATIN = new Set(sec.japanese_latin); KATAKANA_NAMES = sec.katakana_names;
       store("pass", $("pass").value.trim());
     }
-    catch (e) { $("output").textContent = "合言葉が違います。設定を開いて、合言葉を入れ直してください。"; return; }
+    catch (e) {
+      $("output").textContent = "合言葉が違います。設定を開いて、合言葉を入れ直してください。";
+      busy = false; setBusy(false); setStatus(""); return;
+    }
   }
   const sentRaw = $("input").value;
-  busy = true; setStatus("翻訳中…");
   const [src, tgt] = direction(text, mode);
   $("dir").textContent = `${LANG_SHORT[src]} → ${LANG_SHORT[tgt]}`;
-  $("output").textContent = ""; $("warn").hidden = true; $("time").textContent = "…";
   const t0 = performance.now(); let first = null, out = "";
   try {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${$("model").value}:streamGenerateContent?alt=sse`, {
@@ -267,7 +311,7 @@ async function translate() {
   } catch (e) {
     $("output").textContent = "エラー: " + e.message + "\n(入力欄はそのまま残しています)"; $("time").textContent = ""; setStatus("");
   } finally {
-    busy = false;
+    busy = false; setBusy(false);
     if ($("input").value.trim()) schedule();  // 翻訳中に打った続きがあれば、それも訳す
   }
 }
@@ -279,9 +323,9 @@ inp.addEventListener("compositionstart", () => { composing = true; clearTimeout(
 inp.addEventListener("compositionend", () => { composing = false; schedule(); });
 inp.addEventListener("input", e => { if (e.inputType === "insertFromPaste") return; if (!composing) schedule(); });
 inp.addEventListener("paste", () => setTimeout(() => schedule(0), 0));
-inp.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) translate(); });
+inp.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); translate(); } });
 $("paste").onclick = async () => { try { inp.value = await navigator.clipboard.readText(); schedule(0); } catch (e) { inp.focus(); } };
-$("copy").onclick = () => { try { navigator.clipboard.writeText($("output").textContent); } catch (e) {} };
+$("copy").onclick = () => { if (!busy) copyText($("output").textContent, $("copy")); };
 $("newconv").onclick = () => {
   if (history.length && history[history.length - 1].type !== "break") { history.push({ type: "break", ts: Date.now() }); saveHistory(); renderHistory(); }
   $("output").textContent = ""; $("dir").textContent = ""; $("time").textContent = ""; setStatus("新しい会話を始めました");
@@ -293,8 +337,8 @@ $("key").value = store("gemini_key") || "";
 $("key").onchange = () => store("gemini_key", $("key").value.trim());
 $("model").value = store("model") || "gemini-3.5-flash-lite";
 $("model").onchange = () => store("model", $("model").value);
-$("delay").value = store("delay") || "2500";
-$("delay").onchange = () => store("delay", $("delay").value);
+$("auto").value = store("auto") || "paste";
+$("auto").onchange = () => { store("auto", $("auto").value); schedule(); };
 renderModes(); renderHistory();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 // ホーム画面に追加できるとき(Chrome が知らせてくれたとき)だけ「インストール」を出す
