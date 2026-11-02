@@ -167,14 +167,25 @@ function contextFrom(hist) {
   }
   return out;
 }
-// 日本語の訳文で、日本人以外の名前は「Name-san」の形にそろえる(モデルが指示どおりにしないことがあるため)。translator.py の fix_names と同じ規則
+// 名前の書き方をそろえる(モデルが指示どおりにしないことがあるため)。translator.py の fix_names / fix_titles と同じ規則
+// 日本語の訳文: ローマ字の名前はすべて「Name-san」。ポルトガル語の訳文: 決まった3人は肩書き + 名前(-san は付けない)
 // 名前の一覧は人名なので、指示書と一緒に暗号化してある(unlock の後に入る)
-let JAPANESE_LATIN = new Set(), KATAKANA_NAMES = [];
+let KATAKANA_NAMES = [], PT_TITLES = [];
 function fixNames(text) {
   for (const [kana, latin] of KATAKANA_NAMES) text = text.split(kana + "さん").join(latin + "さん");
-  return text.replace(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'.\-]*)\s?さん/g, (m, name) =>
-    JAPANESE_LATIN.has(name.toLowerCase()) ? name + "さん" : name + "-san");
+  text = text.replace(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'.\-]*?)(?:\s?さん|-san\s?さん)/g, (m, name) => name + "-san");
+  return text.replace(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'.\-]*-san)\s?[（(]\1[）)]/g, "$1");  // 「Name-san(Name-san)」の重複を消す
 }
+const TITLE_WORDS = String.raw`(?:(?:Sr|Sra|Dr|Dra|Eng)\.?|Senhor|Senhora|Dona|Doutor|Doutora|Director|Directora|Diretor|Diretora|Engenheiro)`;
+function fixTitles(text) {
+  for (const [name, title, alias] of PT_TITLES) {
+    if (alias) text = text.replace(new RegExp(String.raw`(?<![\p{L}\d_@])${alias}(?!\s+${name})(?!\p{L})`, "giu"), `${title} ${name.replace(/\[.*?\]/g, "i")}`);
+    const re = new RegExp(String.raw`(^|[^@\p{L}])((?:${TITLE_WORDS}\s+)*)(${name})(?:-san)?(?!\p{L})`, "giu");
+    text = text.replace(re, (m, pre, titles, n) => `${pre}${title} ${n}`);
+  }
+  return text;
+}
+const tidy = (out, tgt) => tgt === "ja" ? fixNames(out) : tgt === "pt" ? fixTitles(out) : out;
 // 翻訳中に続きを打っていたら、訳した部分だけを消して続きは残す
 function remainder(current, sent) {
   return current.startsWith(sent) ? current.slice(sent.length).replace(/^\s+/, "") : current;
@@ -264,7 +275,7 @@ async function translate() {
   if (!SYSTEM_PROMPT) {
     try {
       const sec = JSON.parse(await unlock($("pass").value.trim()));
-      SYSTEM_PROMPT = sec.prompt; JAPANESE_LATIN = new Set(sec.japanese_latin); KATAKANA_NAMES = sec.katakana_names;
+      SYSTEM_PROMPT = sec.prompt; KATAKANA_NAMES = sec.katakana_names; PT_TITLES = sec.pt_titles;
       store("pass", $("pass").value.trim());
     }
     catch (e) {
@@ -298,10 +309,10 @@ async function translate() {
         if (!line.startsWith("data:")) continue;
         const parts = JSON.parse(line.slice(5)).candidates?.[0]?.content?.parts || [];
         const chunk = parts.map(p => p.text || "").join("");
-        if (chunk) { if (first === null) first = performance.now() - t0; out += chunk; $("output").textContent = tgt === "ja" ? fixNames(out) : out; }
+        if (chunk) { if (first === null) first = performance.now() - t0; out += chunk; $("output").textContent = tidy(out, tgt); }
       }
     }
-    out = out.trim(); if (tgt === "ja") out = fixNames(out); $("output").textContent = out;
+    out = tidy(out.trim(), tgt); $("output").textContent = out;
     const total = (performance.now() - t0) / 1000;
     $("time").textContent = `最初 ${((first ?? 0) / 1000).toFixed(1)}秒 / 合計 ${total.toFixed(1)}秒`;
     if (tgt !== "ja" && CJK.test(out)) { $("warn").textContent = "訳文に日本語の文字が混ざっています。履歴の原文を貼り直して、もう一度訳してください。"; $("warn").hidden = false; }
