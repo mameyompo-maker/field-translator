@@ -47,8 +47,14 @@ textarea { width: 100%; min-height: 110px; padding: 10px; border: 1px solid var(
 .item .src { color: var(--muted); white-space: pre-wrap; word-break: break-word; }
 .item .dst { white-space: pre-wrap; word-break: break-word; }
 .divider { text-align: center; color: var(--muted); font-size: 12px; border-top: 2px dashed var(--line); padding: 4px 0; margin-top: 4px; }
-details { margin-top: 18px; color: var(--muted); font-size: 14px; }
-details input, details select { width: 100%; padding: 8px; margin: 4px 0 10px; border: 1px solid var(--line);
+/* 設定は右上のボタンから開く画面(以前はページの一番下にあった) */
+dialog { width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 32px); border: 1px solid var(--line); border-radius: 14px;
+  background: var(--bg); color: var(--ink); padding: 14px 16px 18px; font-size: 14px; }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+dialog .dhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+dialog h2 { font-size: 17px; margin: 0; }
+dialog label { display: block; color: var(--muted); }
+dialog input, dialog select { width: 100%; padding: 8px; margin: 4px 0 10px; border: 1px solid var(--line);
   border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; }
 .icon-btn { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
 .spin { display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; border: 2px solid currentColor;
@@ -69,6 +75,7 @@ details input, details select { width: 100%; padding: 8px; margin: 4px 0 10px; b
     <span>
       <button class="icon-btn" id="install" hidden>インストール</button>
       <button class="icon-btn" id="newconv" title="ここから先は、前の会話を文脈に使わない">新しい会話</button>
+      <button class="icon-btn" id="opensettings" aria-haspopup="dialog">⚙ 設定</button>
     </span>
   </header>
 
@@ -95,8 +102,9 @@ details input, details select { width: 100%; padding: 8px; margin: 4px 0 10px; b
     <div id="history"></div>
   </section>
 
-  <details>
-    <summary>設定</summary>
+</main>
+<dialog id="settings" aria-labelledby="settings-title">
+    <div class="dhead"><h2 id="settings-title">設定</h2><button class="icon-btn" id="closesettings">閉じる</button></div>
     <label>合言葉(用語集を開く鍵。この端末にだけ保存)<input id="pass" type="password" autocomplete="off"></label>
     <label>Gemini API キー(この端末にだけ保存)<input id="key" type="password" autocomplete="off"></label>
     <label>モデル
@@ -107,14 +115,13 @@ details input, details select { width: 100%; padding: 8px; margin: 4px 0 10px; b
     </label>
     <label>自動で訳すとき
       <select id="auto">
-        <option value="paste">貼り付けたときだけ(既定。手で打ったときは「翻訳する」か Ctrl+Enter)</option>
-        <option value="typing">貼り付けたときと、手で打って2.5秒止まったとき</option>
-        <option value="off">自動で訳さない(いつも「翻訳する」を押す)</option>
+        <option value="paste">貼り付けたときだけ(既定)</option>
+        <option value="typing">貼り付けたときと、手が2.5秒止まったとき</option>
+        <option value="off">自動で訳さない</option>
       </select>
     </label>
     <button class="danger" id="clearhist">履歴をすべて消す</button>
-  </details>
-</main>
+</dialog>
 <div class="toast" id="toast" role="status"></div>
 
 <script>
@@ -268,7 +275,7 @@ async function translate() {
   const text = $("input").value.trim();
   const key = $("key").value.trim();
   if (!text || busy) return;
-  if (!key) { $("output").textContent = "設定に Gemini API キーを入れてください。"; return; }
+  if (!key) { $("output").textContent = "設定に Gemini API キーを入れてください。"; openSettings($("key")); return; }
   // 押した瞬間からクルクルを出す(初回は合言葉の復号に少し時間がかかる)
   busy = true; setStatus("翻訳中…", true); setBusy(true);
   $("output").innerHTML = '<span class="loading"><span class="spin"></span>翻訳中…</span>'; $("warn").hidden = true; $("time").textContent = "";
@@ -279,7 +286,7 @@ async function translate() {
       store("pass", $("pass").value.trim());
     }
     catch (e) {
-      $("output").textContent = "合言葉が違います。設定を開いて、合言葉を入れ直してください。";
+      $("output").textContent = "合言葉が違います。設定を開いて、合言葉を入れ直してください。"; openSettings($("pass"));
       busy = false; setBusy(false); setStatus(""); return;
     }
   }
@@ -337,6 +344,11 @@ inp.addEventListener("paste", () => setTimeout(() => schedule(0), 0));
 inp.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); translate(); } });
 $("paste").onclick = async () => { try { inp.value = await navigator.clipboard.readText(); schedule(0); } catch (e) { inp.focus(); } };
 $("copy").onclick = () => { if (!busy) copyText($("output").textContent, $("copy")); };
+// 設定画面。外側(暗いところ)を押しても閉じる
+function openSettings(focusEl) { const d = $("settings"); if (!d.open) d.showModal(); if (focusEl) focusEl.focus(); }
+$("opensettings").onclick = () => openSettings();
+$("closesettings").onclick = () => $("settings").close();
+$("settings").addEventListener("click", e => { if (e.target === $("settings")) $("settings").close(); });
 $("newconv").onclick = () => {
   if (history.length && history[history.length - 1].type !== "break") { history.push({ type: "break", ts: Date.now() }); saveHistory(); renderHistory(); }
   $("output").textContent = ""; $("dir").textContent = ""; $("time").textContent = ""; setStatus("新しい会話を始めました");

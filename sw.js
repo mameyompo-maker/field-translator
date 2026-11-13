@@ -1,6 +1,6 @@
 // Field Translator の service worker。画面のファイルを保存して、起動を速くする。
 // 画面を変えたら VERSION を上げること(古い保存を消すため)。
-const VERSION = "ft-v5";
+const VERSION = "ft-v6";
 const SHELL = ["./", "./index.html", "./manifest.json", "./icons/icon-192-v2.png", "./icons/icon-512-v2.png",
   "./icons/icon-512-maskable-v2.png", "./icons/apple-touch-icon-v2.png", "./icons/favicon-32-v2.png"];
 
