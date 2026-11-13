@@ -1,8 +1,8 @@
 // Field Translator の service worker。画面のファイルを保存して、起動を速くする。
 // 画面を変えたら VERSION を上げること(古い保存を消すため)。
-const VERSION = "ft-v4";
-const SHELL = ["./", "./index.html", "./manifest.json", "./icons/icon-192.png", "./icons/icon-512.png",
-  "./icons/icon-512-maskable.png", "./icons/apple-touch-icon.png", "./icons/favicon-32.png"];
+const VERSION = "ft-v5";
+const SHELL = ["./", "./index.html", "./manifest.json", "./icons/icon-192-v2.png", "./icons/icon-512-v2.png",
+  "./icons/icon-512-maskable-v2.png", "./icons/apple-touch-icon-v2.png", "./icons/favicon-32-v2.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
